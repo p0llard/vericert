@@ -53,6 +53,7 @@ Record module: Type :=
     mod_clk : reg;
     mod_scldecls : AssocMap.t (option Verilog.io * Verilog.scl_decl);
     mod_arrdecls : AssocMap.t (option Verilog.io * Verilog.arr_decl);
+    mod_stackinit : PTree.t value;
   }.
 
 Definition fundef := AST.fundef module.

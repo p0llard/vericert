@@ -86,7 +86,7 @@ Inductive match_states : RTL.state -> HTL.state -> Prop :=
       match_states (RTL.Callstate nil (AST.Internal f) nil m0) (HTL.Callstate nil m nil).
 Hint Constructors match_states : htlproof.
 
-Definition match_prog (p: RTL.program) (tp: HTL.program) :=
+(*Definition match_prog (p: RTL.program) (tp: HTL.program) :=
   Linking.match_program (fun cu f tf => transl_fundef f = Errors.OK tf) eq p tp.
 
 Lemma transf_program_match:
@@ -196,13 +196,13 @@ Proof.
   - rewrite Registers.Regmap.gi. unfold find_assocmap.
     unfold AssocMapExt.get_default. rewrite AssocMap.gempty.
     constructor.
-Qed.
+Qed. *)
 
 Section CORRECTNESS.
 
   Variable prog : RTL.program.
   Variable tprog : HTL.program.
-
+(*
   Hypothesis TRANSL : match_prog prog tprog.
 
   Let ge : RTL.genv := Globalenvs.Genv.globalenv prog.
@@ -574,16 +574,11 @@ Section CORRECTNESS.
   Proof.
     intros. inv H0. inv H. inv H4. inv MS. constructor. trivial.
   Qed.
-  Hint Resolve transl_final_states : htlproof.
+  Hint Resolve transl_final_states : htlproof. *)
 
 Theorem transf_program_correct:
   Smallstep.forward_simulation (RTL.semantics prog) (HTL.semantics tprog).
 Proof.
-  eapply Smallstep.forward_simulation_plus.
-  apply senv_preserved.
-  eexact transl_initial_states.
-  eexact transl_final_states.
-  exact transl_step_correct.
-Qed.
+Admitted.
 
 End CORRECTNESS.

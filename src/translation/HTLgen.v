@@ -16,9 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-From compcert Require Import Maps.
-From compcert Require Errors Globalenvs.
-From compcert Require Import AST RTL.
+From compcert Require Errors Globalenvs Integers.
+From compcert Require Import AST RTL Maps Liveness ValueDomain ValueAOp ValueAnalysis ConstpropOp.
 From coqup Require Import Verilog HTL Coquplib AssocMap Value Statemonad.
 
 Hint Resolve AssocMap.gempty : htlh.
@@ -33,6 +32,7 @@ Record state: Type := mkstate {
   st_freshstate: node;
   st_scldecls: AssocMap.t (option io * scl_decl);
   st_arrdecls: AssocMap.t (option io * arr_decl);
+  st_stackinit: PTree.t value;
   st_datapath: datapath;
   st_controllogic: controllogic;
 }.
@@ -43,6 +43,7 @@ Definition init_state (st : reg) : state :=
           1%positive
           (AssocMap.empty (option io * scl_decl))
           (AssocMap.empty (option io * arr_decl))
+          (PTree.empty value)
           (AssocMap.empty stmnt)
           (AssocMap.empty stmnt).
 
@@ -116,6 +117,7 @@ Lemma add_instr_state_incr :
        (st_freshstate s)
        s.(st_scldecls)
        s.(st_arrdecls)
+       s.(st_stackinit)
        (AssocMap.set n st s.(st_datapath))
        (AssocMap.set n (state_goto s.(st_st) n') s.(st_controllogic))).
 Proof.
@@ -133,6 +135,7 @@ Lemma declare_reg_state_incr :
        s.(st_freshstate)
        (AssocMap.set r (i, Scalar sz) s.(st_scldecls))
        s.(st_arrdecls)
+       s.(st_stackinit)
        s.(st_datapath)
        s.(st_controllogic)).
 Proof. auto with htlh. Qed.
@@ -144,6 +147,7 @@ Definition declare_reg (i : option io) (r : reg) (sz : nat) : mon unit :=
                 s.(st_freshstate)
                 (AssocMap.set r (i, Scalar sz) s.(st_scldecls))
                 s.(st_arrdecls)
+                s.(st_stackinit)
                 s.(st_datapath)
                 s.(st_controllogic))
               (declare_reg_state_incr i s r sz).
@@ -158,6 +162,7 @@ Definition add_instr (n : node) (n' : node) (st : stmnt) : mon unit :=
                (st_freshstate s)
                s.(st_scldecls)
                s.(st_arrdecls)
+               s.(st_stackinit)
                (AssocMap.set n st s.(st_datapath))
                (AssocMap.set n (state_goto s.(st_st) n') s.(st_controllogic)))
          (add_instr_state_incr s n n' st STM TRANS)
@@ -175,6 +180,7 @@ Lemma add_instr_skip_state_incr :
        (st_freshstate s)
        s.(st_scldecls)
        s.(st_arrdecls)
+       s.(st_stackinit)
        (AssocMap.set n st s.(st_datapath))
        (AssocMap.set n Vskip s.(st_controllogic))).
 Proof.
@@ -193,6 +199,7 @@ Definition add_instr_skip (n : node) (st : stmnt) : mon unit :=
                (st_freshstate s)
                s.(st_scldecls)
                s.(st_arrdecls)
+               s.(st_stackinit)
                (AssocMap.set n st s.(st_datapath))
                (AssocMap.set n Vskip s.(st_controllogic)))
          (add_instr_skip_state_incr s n st STM TRANS)
@@ -313,6 +320,7 @@ Lemma add_branch_instr_state_incr:
                 (st_freshstate s)
                 s.(st_scldecls)
                 s.(st_arrdecls)
+                s.(st_stackinit)
                 (AssocMap.set n Vskip (st_datapath s))
                 (AssocMap.set n (state_cond s.(st_st) e n1 n2) (st_controllogic s))).
 Proof.
@@ -331,6 +339,7 @@ Definition add_branch_instr (e: expr) (n n1 n2: node) : mon unit :=
                 (st_freshstate s)
                 s.(st_scldecls)
                 s.(st_arrdecls)
+                s.(st_stackinit)
                 (AssocMap.set n Vskip (st_datapath s))
                 (AssocMap.set n (state_cond s.(st_st) e n1 n2) (st_controllogic s)))
          (add_branch_instr_state_incr s e n n1 n2 NSTM NTRANS)
@@ -359,7 +368,44 @@ Definition translate_arr_access (mem : AST.memory_chunk) (addr : Op.addressing)
   | _, _ => error (Errors.msg "Htlgen: translate_arr_access unsupported addressing")
   end.
 
-Definition transf_instr (fin rtrn stack: reg) (ni: node * instruction) : mon unit :=
+Definition const_for_result (a : aval) : option value :=
+  match a with
+  | I n => Some (intToValue n)
+  | _ => None
+  end.
+
+Lemma declare_mem_incr :
+  forall offset v s,
+  st_incr s (mkstate
+           s.(st_st)
+           (st_freshreg s)
+           (st_freshstate s)
+           s.(st_scldecls)
+           s.(st_arrdecls)
+           (PTree.set offset v s.(st_stackinit))
+           s.(st_datapath)
+           s.(st_controllogic)).
+Proof. auto with htlh. Qed.
+
+Definition declare_mem (ofs : Integers.ptrofs) (v : value) : mon unit :=
+  fun s =>
+    let offset := Z.to_pos (Integers.Ptrofs.unsigned ofs) in
+    match PTree.get offset s.(st_stackinit) with
+    | Some v => OK tt s (st_refl s)
+    | None => OK tt (mkstate
+                   s.(st_st)
+                   s.(st_freshreg)
+                   s.(st_freshstate)
+                   s.(st_scldecls)
+                   s.(st_arrdecls)
+                   (PTree.set offset v s.(st_stackinit))
+                   s.(st_datapath)
+                   s.(st_controllogic))
+                 (declare_mem_incr offset v s)
+    end.
+
+Definition transf_instr (an : PMap.t VA.t) (rm : romem) (fin rtrn stack: reg)
+           (ni: node * instruction) : mon unit :=
   match ni with
     (n, i) =>
     match i with
@@ -373,8 +419,28 @@ Definition transf_instr (fin rtrn stack: reg) (ni: node * instruction) : mon uni
       do _ <- declare_reg None dst 32;
       add_instr n n' (block dst src)
     | Istore mem addr args src n' =>
-      do dst <- translate_arr_access mem addr args stack;
-      add_instr n n' (Vblock dst (Vvar src)) (* TODO: Could juse use add_instr? reg exists. *)
+        match an!!n with
+        | VA.Bot =>
+          do dst <- translate_arr_access mem addr args stack;
+          add_instr n n' (Vnonblock dst (Vvar src)) (* TODO: Could juse use add_instr? reg exists. *)
+        | VA.State ae am =>
+          let aargs := aregs ae args in
+          match eval_static_addressing addr aargs with
+          | Ptr (Stk ofs) =>
+            let a := ValueDomain.loadv mem rm am (Ptr (Stk ofs)) in
+            match const_for_result a with
+            | Some v =>
+              do _ <- declare_mem ofs v;
+              add_instr n n' Vskip
+            | None =>
+              do dst <- translate_arr_access mem addr args stack;
+              add_instr n n' (Vnonblock dst (Vvar src)) (* TODO: Could juse use add_instr? reg exists. *)
+            end
+          | _ =>
+            do dst <- translate_arr_access mem addr args stack;
+            add_instr n n' (Vnonblock dst (Vvar src)) (* TODO: Could juse use add_instr? reg exists. *)
+          end
+        end
     | Icall _ _ _ _ _ => error (Errors.msg "Calls are not implemented.")
     | Itailcall _ _ _ => error (Errors.msg "Tailcalls are not implemented.")
     | Ibuiltin _ _ _ _ => error (Errors.msg "Builtin functions not implemented.")
@@ -400,8 +466,9 @@ Lemma create_reg_state_incr:
          (st_freshstate s)
          (AssocMap.set s.(st_freshreg) (i, Scalar sz) s.(st_scldecls))
          s.(st_arrdecls)
-         (st_datapath s)
-         (st_controllogic s)).
+         s.(st_stackinit)
+         s.(st_datapath)
+         s.(st_controllogic)).
 Proof. constructor; simpl; auto with htlh. Qed.
 
 Definition create_reg (i : option io) (sz : nat) : mon reg :=
@@ -412,6 +479,7 @@ Definition create_reg (i : option io) (sz : nat) : mon reg :=
                    (st_freshstate s)
                    (AssocMap.set s.(st_freshreg) (i, Scalar sz) s.(st_scldecls))
                    (st_arrdecls s)
+                   s.(st_stackinit)
                    (st_datapath s)
                    (st_controllogic s))
               (create_reg_state_incr s sz i).
@@ -424,6 +492,7 @@ Lemma create_arr_state_incr:
          (st_freshstate s)
          s.(st_scldecls)
          (AssocMap.set s.(st_freshreg) (i, Array sz ln) s.(st_arrdecls))
+         s.(st_stackinit)
          (st_datapath s)
          (st_controllogic s)).
 Proof. constructor; simpl; auto with htlh. Qed.
@@ -436,15 +505,18 @@ Definition create_arr (i : option io) (sz : nat) (ln : nat) : mon reg :=
                    (st_freshstate s)
                    s.(st_scldecls)
                    (AssocMap.set s.(st_freshreg) (i, Array sz ln) s.(st_arrdecls))
+                   s.(st_stackinit)
                    (st_datapath s)
                    (st_controllogic s))
               (create_arr_state_incr s sz ln i).
 
-Definition transf_module (f: function) : mon module :=
+Definition transf_module (rm : romem) (f: function) : mon module :=
+  let an := ValueAnalysis.analyze rm f in
+  if (Z.eq_dec (Z.modulo f.(fn_stacksize) 4) 0) then
   do fin <- create_reg (Some Voutput) 1;
   do rtrn <- create_reg (Some Voutput) 32;
   do stack <- create_arr None 32 (Z.to_nat (f.(fn_stacksize) / 4));
-  do _ <- collectlist (transf_instr fin rtrn stack) (Maps.PTree.elements f.(RTL.fn_code));
+  do _ <- collectlist (transf_instr an rm fin rtrn stack) (Maps.PTree.elements f.(RTL.fn_code));
   do _ <- collectlist (fun r => declare_reg (Some Vinput) r 32) f.(RTL.fn_params);
   do start <- create_reg (Some Vinput) 1;
   do rst <- create_reg (Some Vinput) 1;
@@ -463,7 +535,9 @@ Definition transf_module (f: function) : mon module :=
          rst
          clk
          current_state.(st_scldecls)
-         current_state.(st_arrdecls)).
+         current_state.(st_arrdecls)
+         current_state.(st_stackinit))
+  else error (Errors.msg "Stack size misalignment.").
 
 Definition max_state (f: function) : state :=
   let st := Pos.succ (max_reg_function f) in
@@ -472,15 +546,18 @@ Definition max_state (f: function) : state :=
           (Pos.succ (max_pc_function f))
           (AssocMap.set st (None, Scalar 32) (st_scldecls (init_state st)))
           (st_arrdecls (init_state st))
+          (st_stackinit (init_state st))
           (st_datapath (init_state st))
           (st_controllogic (init_state st)).
 
-Definition transl_module (f : function) : Errors.res module :=
-  run_mon (max_state f) (transf_module f).
+Definition transl_module (rm : romem) (f : function) : Errors.res module :=
+  run_mon (max_state f) (transf_module rm f).
 
-Definition transl_fundef := transf_partial_fundef transl_module.
+Definition transl_fundef (rm : romem) := transf_partial_fundef (transl_module rm).
 
-Definition transl_program (p : RTL.program) := transform_partial_program transl_fundef p.
+Definition transl_program (p : RTL.program) :=
+  let rm := romem_for p in
+  transform_partial_program (transl_fundef rm) p.
 
 (*Definition transl_main_fundef f : Errors.res HTL.fundef :=
   match f with

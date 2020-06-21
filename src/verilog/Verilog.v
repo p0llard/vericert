@@ -197,7 +197,8 @@ Inductive module_item : Type :=
 | Vdeclaration : declaration -> module_item
 | Valways : edge -> stmnt -> module_item
 | Valways_ff : edge -> stmnt -> module_item
-| Valways_comb : edge -> stmnt -> module_item.
+| Valways_comb : edge -> stmnt -> module_item
+| Vinitial : stmnt -> module_item.
 
 (** The main module type containing all the important control signals
 

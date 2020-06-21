@@ -39,11 +39,19 @@ Fixpoint arr_to_Vdeclarr (arrdecl : list (reg * (option io * arr_decl))) {struct
   | nil => nil
   end.
 
+Fixpoint stackinit_to_Vinitial (s : reg) (stackinit : list (positive * value)) {struct stackinit} : stmnt :=
+  match stackinit with
+  | (p, v)::stackinit' => Vseq (Vblock (Vvari s (Vlit (posToValue 32 p))) (Vlit v))
+                               (stackinit_to_Vinitial s stackinit')
+  | nil => Vskip
+  end.
+
 Definition transl_module (m : HTL.module) : Verilog.module :=
   let case_el_ctrl := transl_list (PTree.elements m.(mod_controllogic)) in
   let case_el_data := transl_list (PTree.elements m.(mod_datapath)) in
   let body :=
-      Valways (Vposedge m.(mod_clk)) (Vcase (Vvar m.(mod_st)) case_el_data (Some Vskip))
+      Vinitial (stackinit_to_Vinitial m.(mod_stk) (PTree.elements m.(mod_stackinit)))
+      :: Valways (Vposedge m.(mod_clk)) (Vcase (Vvar m.(mod_st)) case_el_data (Some Vskip))
       :: Valways (Vposedge m.(mod_clk)) (Vcond (Vbinop Veq (Vvar m.(mod_reset)) (ZToValue 1 1))
                                                (Vnonblock (Vvar m.(mod_st)) (posToValue 32 m.(mod_entrypoint)))
                                                (Vcase (Vvar m.(mod_st)) case_el_ctrl (Some Vskip)))
