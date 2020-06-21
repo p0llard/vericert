@@ -140,7 +140,8 @@ let pprint_module_item i = function
   | Valways_comb (e, s) ->
     concat [indent i; "always "; pprint_edge_top i e; "\n"; pprint_stmnt (i+1) s]
   | Vinitial s ->
-    concat [indent i; "initial \n"; pprint_stmnt (i+1) s]
+    concat [indent i; "initial\n"; indent (i+1); "begin\n"; pprint_stmnt (i+2) s;
+           indent (i+1); "end\n"]
 
 let rec intersperse c = function
   | [] -> []

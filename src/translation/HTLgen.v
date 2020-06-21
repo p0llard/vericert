@@ -389,9 +389,9 @@ Proof. auto with htlh. Qed.
 
 Definition declare_mem (ofs : Integers.ptrofs) (v : value) : mon unit :=
   fun s =>
-    let offset := Z.to_pos (Integers.Ptrofs.unsigned ofs) in
+    let offset := Z.to_pos ((Integers.Ptrofs.unsigned ofs) / 4 + 1) in
     match PTree.get offset s.(st_stackinit) with
-    | Some v => OK tt s (st_refl s)
+    | Some _ => OK tt s (st_refl s)
     | None => OK tt (mkstate
                    s.(st_st)
                    s.(st_freshreg)
@@ -427,7 +427,7 @@ Definition transf_instr (an : PMap.t VA.t) (rm : romem) (fin rtrn stack: reg)
           let aargs := aregs ae args in
           match eval_static_addressing addr aargs with
           | Ptr (Stk ofs) =>
-            let a := ValueDomain.loadv mem rm am (Ptr (Stk ofs)) in
+            let a := areg ae src in
             match const_for_result a with
             | Some v =>
               do _ <- declare_mem ofs v;

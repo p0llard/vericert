@@ -41,7 +41,7 @@ Fixpoint arr_to_Vdeclarr (arrdecl : list (reg * (option io * arr_decl))) {struct
 
 Fixpoint stackinit_to_Vinitial (s : reg) (stackinit : list (positive * value)) {struct stackinit} : stmnt :=
   match stackinit with
-  | (p, v)::stackinit' => Vseq (Vblock (Vvari s (Vlit (posToValue 32 p))) (Vlit v))
+  | (p, v)::stackinit' => Vseq (Vblock (Vvari s (Vlit (ZToValue 32 (Z.pos p - 1)))) (Vlit v))
                                (stackinit_to_Vinitial s stackinit')
   | nil => Vskip
   end.
