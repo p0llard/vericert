@@ -424,12 +424,12 @@ Lemma declare_mem_incr :
            s.(st_controllogic)).
 Proof. auto with htlh. Qed.
 
-Definition declare_mem (ofs : Integers.ptrofs) (v : value) : mon unit :=
+Definition declare_mem (ofs : Integers.ptrofs) (v : value) : mon bool :=
   fun s =>
     let offset := Z.to_pos ((Integers.Ptrofs.unsigned ofs) / 4 + 1) in
     match PTree.get offset s.(st_stackinit) with
-    | Some _ => OK tt s (st_refl s)
-    | None => OK tt (mkstate
+    | Some _ => OK false s (st_refl s)
+    | None => OK true (mkstate
                    s.(st_st)
                    s.(st_freshreg)
                    s.(st_freshstate)
@@ -479,8 +479,11 @@ Definition transf_instr (an : PMap.t VA.t) (rm : romem) (fin rtrn stack: reg)
             let a := areg ae src in
             match const_for_result a with
             | Some v =>
-              do _ <- declare_mem ofs v;
-              add_instr n n' Vskip
+              do b <- declare_mem ofs v;
+              if b
+              then add_instr n n' Vskip
+              else do dst <- translate_arr_access mem addr args stack;
+                   add_instr n n' (Vnonblock dst (Vvar src))
             | None =>
               do dst <- translate_arr_access mem addr args stack;
               add_instr n n' (Vnonblock dst (Vvar src)) (* TODO: Could juse use add_instr? reg exists. *)
