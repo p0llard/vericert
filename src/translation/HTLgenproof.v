@@ -359,13 +359,17 @@ Section CORRECTNESS.
   Hint Resolve senv_preserved : htlproof.
 
   Lemma eval_correct :
-    forall sp op rs args m v v' e asr asa f s s' i,
+    forall sp op rs args m v v' e asr asa s s' i f f',
+      match_assocmaps f rs asr ->
       Op.eval_operation ge sp op
 (List.map (fun r : BinNums.positive => Registers.Regmap.get r rs) args) m = Some v ->
       translate_instr op args s = OK e s' i ->
       val_value_lessdef v v' ->
-      Verilog.expr_runp f asr asa e v'.
-  Admitted.
+      Verilog.expr_runp f' asr asa e v'.
+  Proof.
+    intros. destruct op.
+    - simpl in *. repeat (unfold_match H0). repeat (unfold_match H1). subst. inv H2.
+      + inv H1. inv H0. inv Heql. constructor. inv H.
 
   Lemma eval_cond_correct :
     forall cond (args : list Registers.reg) s1 c s' i rs args m b f asr asa,

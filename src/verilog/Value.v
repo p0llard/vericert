@@ -87,9 +87,18 @@ Definition intToValue (i : Integers.int) : value :=
 Definition valueToInt (i : value) : Integers.int :=
   Int.repr (uvalueToZ i).
 
+Definition ptrToValue (i : Integers.ptrofs) : value :=
+  ZToValue Ptrofs.wordsize (Ptrofs.unsigned i).
+
+Definition valueToPtr (i : value) : Integers.ptrofs :=
+  Ptrofs.repr (uvalueToZ i).
+
 Definition valToValue (v : Values.val) : option value :=
   match v with
   | Values.Vint i => Some (intToValue i)
+  | Values.Vptr b off => if Z.eqb (Z.modulo (uvalueToZ (ptrToValue off)) 4) 0%Z
+                         then Some (ptrToValue off)
+                         else None
   | Values.Vundef => Some (ZToValue 32 0%Z)
   | _ => None
   end.
@@ -299,12 +308,14 @@ End HexNotationValue.
 Inductive val_value_lessdef: val -> value -> Prop :=
 | val_value_lessdef_int:
     forall i v',
+    vsize v' = 32 ->
     i = valueToInt v' ->
     val_value_lessdef (Vint i) v'
 | val_value_lessdef_ptr:
     forall b off v',
-    off = Ptrofs.repr (valueToZ v') ->
-    (Z.modulo (valueToZ v') 4) = 0%Z ->
+    vsize v' = 32 ->
+    off = valueToPtr v' ->
+    (Z.modulo (uvalueToZ v') 4) = 0%Z ->
     val_value_lessdef (Vptr b off) v'
 | lessdef_undef: forall v, val_value_lessdef Vundef v.
 
@@ -381,16 +392,67 @@ Proof.
   apply Z.lt_le_pred in H. apply H.
 Qed.
 
-Lemma valToValue_lessdef :
-  forall v v',
-    valToValue v = Some v' ->
-    val_value_lessdef v v'.
+Lemma valueToPtr_ptrToValue :
+  forall v,
+  valueToPtr (ptrToValue v) = v.
 Proof.
   intros.
-  destruct v; try discriminate; constructor.
-  unfold valToValue in H. inversion H.
-  symmetry. apply valueToInt_intToValue.
+  unfold valueToPtr, ptrToValue. rewrite uvalueToZ_ZToValue. auto using Ptrofs.repr_unsigned.
+  split. apply Ptrofs.unsigned_range_2.
+  assert ((Ptrofs.unsigned v <= Ptrofs.max_unsigned)%Z) by apply Ptrofs.unsigned_range_2.
+  apply Z.lt_le_pred in H. apply H.
 Qed.
+
+Lemma intToValue_valueToInt :
+  forall v,
+  vsize v = 32 ->
+  intToValue (valueToInt v) = v.
+Proof.
+  intros. unfold valueToInt, intToValue. rewrite Int.unsigned_repr_eq.
+  unfold ZToValue, uvalueToZ. unfold Int.modulus. unfold Int.wordsize. unfold Wordsize_32.wordsize.
+  pose proof (uwordToZ_bound (vword v)).
+  rewrite Z.mod_small. rewrite <- H. rewrite ZToWord_uwordToZ. destruct v; auto.
+  rewrite <- H. rewrite two_power_nat_equiv. apply H0.
+Qed.
+
+Lemma ptrToValue_valueToPtr :
+  forall v,
+  vsize v = 32 ->
+  ptrToValue (valueToPtr v) = v.
+Proof.
+  intros. unfold valueToPtr, ptrToValue. rewrite Ptrofs.unsigned_repr_eq.
+  unfold ZToValue, uvalueToZ. unfold Ptrofs.modulus. unfold Ptrofs.wordsize. unfold Wordsize_Ptrofs.wordsize.
+  pose proof (uwordToZ_bound (vword v)).
+  rewrite Z.mod_small. rewrite <- H. rewrite ZToWord_uwordToZ. destruct v; auto.
+  rewrite <- H. rewrite two_power_nat_equiv. apply H0.
+Qed.
+
+Lemma valToValue_lessdef :
+  forall v v',
+    valToValue v = Some v' <->
+    val_value_lessdef v v'.
+Proof.
+  split.
+  - intros.
+    destruct v; try discriminate; constructor; inversion H; unfold valToValue.
+    + unfold intToValue. simpl. auto.
+    + symmetry. apply valueToInt_intToValue.
+    + destruct ((uvalueToZ (ptrToValue i) mod 4 =? 0)%Z) eqn:?; try discriminate. inversion H1.
+      unfold ptrToValue. simpl. auto.
+    + destruct ((uvalueToZ (ptrToValue i) mod 4 =? 0)%Z) eqn:?; try discriminate; inversion H1.
+      symmetry. apply valueToPtr_ptrToValue.
+    + destruct ((uvalueToZ (ptrToValue i) mod 4 =? 0)%Z) eqn:?; try discriminate; inversion H1.
+      apply Z.eqb_eq. apply Heqb0.
+  - intros. inversion H; subst.
+    + simpl. inversion H. subst. rewrite intToValue_valueToInt; auto.
+    + simpl. destruct (uvalueToZ (ptrToValue (valueToPtr v')) mod 4 =? 0)%Z eqn:?.
+      rewrite ptrToValue_valueToPtr. trivial.
+      assumption.
+      apply Z.eqb_eq in H2. rewrite ptrToValue_valueToPtr in Heqb0.
+      rewrite H2 in Heqb0. discriminate.
+      assumption.
+    + simpl. inversion H. Abort.
+
 
 Lemma boolToValue_ValueToBool :
   forall b,
