@@ -369,7 +369,9 @@ Section CORRECTNESS.
   Proof.
     intros. destruct op.
     - simpl in *. repeat (unfold_match H0). repeat (unfold_match H1). subst. inv H2.
-      + inv H1. inv H0. inv Heql. constructor. inv H.
+      + inv H1. inv H0. inv Heql. constructor. inv H. specialize (H0 p).
+        rewrite H1 in H0. assert (Ple p (RTL.max_reg_function f)) by admit. apply H0 in H.
+        inv H. unfold valueToInt in H5.
 
   Lemma eval_cond_correct :
     forall cond (args : list Registers.reg) s1 c s' i rs args m b f asr asa,
