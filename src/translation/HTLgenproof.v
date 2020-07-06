@@ -125,8 +125,7 @@ Definition match_prog (p: RTL.program) (tp: HTL.program) :=
   main_is_internal p = true.
 
 Instance TransfHTLLink
-           {A B V: Type} {LV: Linker V}
-           (tr_fun: A -> Errors.res B):
+           (tr_fun: RTL.program -> Errors.res HTL.program):
   TransfLink (fun (p1: RTL.program) (p2: HTL.program) =>
               match_prog p1 p2).
 Proof.
