@@ -17,7 +17,7 @@
  *)
 
 From compcert Require RTL Registers AST.
-From compcert Require Import Integers Globalenvs Memory.
+From compcert Require Import Integers Globalenvs Memory Linking.
 From coqup Require Import Coquplib HTLgenspec HTLgen ValueInt AssocMap Array IntegerExtra ZExtra.
 From coqup Require HTL Verilog.
 
@@ -124,11 +124,20 @@ Definition match_prog (p: RTL.program) (tp: HTL.program) :=
   Linking.match_program (fun cu f tf => transl_fundef f = Errors.OK tf) eq p tp /\
   main_is_internal p = true.
 
-Definition match_prog_matches :
-  forall p tp,
-    match_prog p tp ->
-    Linking.match_program (fun cu f tf => transl_fundef f = Errors.OK tf) eq p tp.
-  Proof. intros. unfold match_prog in H. tauto. Qed.
+Instance TransfHTLLink
+           {A B V: Type} {LV: Linker V}
+           (tr_fun: A -> Errors.res B):
+  TransfLink (fun (p1: RTL.program) (p2: HTL.program) =>
+              match_prog p1 p2).
+Proof.
+Admitted.
+
+Definition match_prog' (p: RTL.program) (tp: HTL.program) :=
+  Linking.match_program (fun cu f tf => transl_fundef f = Errors.OK tf) eq p tp.
+
+Lemma match_prog_matches :
+  forall p tp, match_prog p tp -> match_prog' p tp.
+Proof. unfold match_prog. tauto. Qed.
 
 Lemma transf_program_match:
   forall p tp, HTLgen.transl_program p = Errors.OK tp -> match_prog p tp.
